@@ -1,0 +1,754 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Transformer Training 08 — Mixed Precision: BF16, FP16, FP8 and Quantised Gradients</title>
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Sora:wght@400;500;600;700&family=Manrope:wght@300;400;500;600;700&family=Source+Code+Pro:ital,wght@0,400;0,500;0,600;0,700;1,400;1,700&display=swap" rel="stylesheet">
+    <style>
+        :root {
+            --bg-primary: #0f2027;
+            --bg-card: #13272f;
+            --bg-code: #182f38;
+            --text-primary: #ede7dd;
+            --text-secondary: #8ca5a9;
+            --accent: #83c395;
+            --accent-dim: #83c39544;
+            --accent-glow: #83c39533;
+            --border: #23404a;
+            --font-display: 'Sora', sans-serif;
+            --font-mono: 'Source Code Pro', 'Source Code Pro', monospace;
+            --font-body: 'Manrope', sans-serif;
+            --max-width: 900px;
+        }
+        *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+        html { scroll-behavior: smooth; }
+        body {
+            background: var(--bg-primary);
+            color: var(--text-primary);
+            font-family: var(--font-body);
+            font-size: 17px;
+            line-height: 1.7;
+            overflow-x: hidden;
+        }
+        .hero {
+            min-height: 100vh;
+            display: flex;
+            flex-direction: column;
+            justify-content: center;
+            align-items: center;
+            padding: 2rem 1.5rem;
+            text-align: center;
+            position: relative;
+        }
+        .hero::before {
+            content: '';
+            position: absolute;
+            top: 0;
+            left: 50%;
+            transform: translateX(-50%);
+            width: 600px;
+            height: 600px;
+            background: radial-gradient(circle, var(--accent-glow) 0%, transparent 70%);
+            pointer-events: none;
+            z-index: 0;
+        }
+        .hero > * { position: relative; z-index: 1; }
+        .series-label {
+            font-family: var(--font-mono);
+            font-size: 0.85rem;
+            color: var(--accent);
+            letter-spacing: 0.15em;
+            text-transform: uppercase;
+            margin-bottom: 1rem;
+        }
+        .hero h1 {
+            font-family: var(--font-display);
+            font-size: clamp(2rem, 5vw, 3.2rem);
+            font-weight: 700;
+            color: var(--text-primary);
+            line-height: 1.2;
+            margin-bottom: 1rem;
+        }
+        .hero h1 .accent { color: var(--accent); }
+        .hero .subtitle {
+            font-size: 1.1rem;
+            color: var(--text-secondary);
+            max-width: 640px;
+            margin-bottom: 2rem;
+        }
+        .tags {
+            display: flex;
+            flex-wrap: wrap;
+            gap: 0.5rem;
+            justify-content: center;
+            margin-bottom: 2.5rem;
+        }
+        .tag {
+            font-family: var(--font-mono);
+            font-size: 0.75rem;
+            padding: 0.25rem 0.75rem;
+            border-radius: 999px;
+            border: 1px solid var(--accent);
+            color: var(--accent);
+            background: var(--accent-dim);
+            white-space: nowrap;
+        }
+        .pipeline {
+            display: flex;
+            flex-wrap: wrap;
+            align-items: center;
+            justify-content: center;
+            gap: 0.25rem;
+            margin-bottom: 1rem;
+            max-width: var(--max-width);
+        }
+        .pipeline-step {
+            font-family: var(--font-mono);
+            font-size: 0.7rem;
+            padding: 0.3rem 0.7rem;
+            background: var(--bg-card);
+            border: 1px solid var(--border);
+            border-radius: 4px;
+            color: var(--text-secondary);
+            white-space: nowrap;
+        }
+        .pipeline-arrow { color: var(--accent); font-size: 0.9rem; font-weight: 700; }
+        .slide {
+            min-height: 100vh;
+            max-width: var(--max-width);
+            margin: 0 auto;
+            padding: 4rem 1.5rem;
+            position: relative;
+            display: flex;
+            flex-direction: column;
+            justify-content: center;
+        }
+        .slide-number {
+            font-family: var(--font-display);
+            font-size: 5rem;
+            font-weight: 700;
+            color: var(--accent-dim);
+            position: absolute;
+            top: 2rem;
+            right: 1.5rem;
+            line-height: 1;
+            user-select: none;
+        }
+        .slide h2 {
+            font-family: var(--font-display);
+            font-size: 1.9rem;
+            font-weight: 700;
+            color: var(--accent);
+            margin-bottom: 1.5rem;
+            line-height: 1.25;
+        }
+        .slide h3 {
+            font-family: var(--font-display);
+            font-size: 1.3rem;
+            font-weight: 600;
+            color: var(--text-primary);
+            margin-top: 1.5rem;
+            margin-bottom: 0.75rem;
+        }
+        .slide p { margin-bottom: 1rem; color: var(--text-secondary); }
+        .slide p strong { color: var(--text-primary); }
+        .slide ul, .slide ol { margin-bottom: 1rem; padding-left: 1.5rem; color: var(--text-secondary); }
+        .slide li { margin-bottom: 0.4rem; }
+        .slide li strong { color: var(--text-primary); }
+        .slide code {
+            font-family: var(--font-mono);
+            font-size: 0.88em;
+            background: var(--bg-code);
+            border: 1px solid var(--border);
+            padding: 0.05rem 0.35rem;
+            border-radius: 3px;
+            color: #cfd7d1;
+        }
+        .code-block {
+            background: var(--bg-code);
+            border: 1px solid var(--border);
+            border-radius: 8px;
+            margin: 1.25rem 0;
+            overflow: hidden;
+        }
+        .code-header {
+            font-family: var(--font-mono);
+            font-size: 0.75rem;
+            color: var(--accent);
+            background: rgba(131,195,149,0.08);
+            padding: 0.4rem 1rem;
+            border-bottom: 1px solid var(--border);
+        }
+        .code-block pre { margin: 0; padding: 1rem; overflow-x: auto; }
+        .code-block code {
+            font-family: var(--font-mono);
+            font-size: 0.85rem;
+            line-height: 1.6;
+            color: #cfd7d1;
+            background: transparent;
+            border: none;
+            padding: 0;
+        }
+        .kw { color: #f48f70; }
+        .fn { color: #d4c0ea; }
+        .str { color: #c3dbea; }
+        .cm { color: #8ca5a9; font-style: italic; }
+        .num { color: #a8cee8; }
+        .type { color: #eac48b; }
+        .dir { color: #f48f70; }
+        .mac { color: #eac48b; }
+        .table-wrap {
+            overflow-x: auto;
+            margin: 1.25rem 0;
+            border-radius: 8px;
+            border: 1px solid var(--border);
+        }
+        table { width: 100%; border-collapse: collapse; font-size: 0.9rem; }
+        th {
+            background: var(--bg-code);
+            color: var(--accent);
+            font-weight: 600;
+            text-align: left;
+            padding: 0.75rem 1rem;
+            border-bottom: 1px solid var(--border);
+            font-family: var(--font-display);
+            white-space: nowrap;
+        }
+        td {
+            padding: 0.6rem 1rem;
+            border-bottom: 1px solid var(--border);
+            color: var(--text-secondary);
+        }
+        tr:last-child td { border-bottom: none; }
+        tr:nth-child(even) td { background: rgba(19,39,47,0.5); }
+        .diagram-flow {
+            display: flex;
+            flex-wrap: wrap;
+            align-items: center;
+            justify-content: center;
+            gap: 0.5rem;
+            margin: 1.5rem 0;
+            padding: 1.5rem;
+            background: var(--bg-card);
+            border: 1px solid var(--border);
+            border-radius: 8px;
+        }
+        .diagram-box {
+            font-family: var(--font-mono);
+            font-size: 0.85rem;
+            padding: 0.5rem 1rem;
+            background: var(--bg-code);
+            border: 1px solid var(--border);
+            border-radius: 6px;
+            color: var(--text-primary);
+            text-align: center;
+            white-space: nowrap;
+        }
+        .diagram-box.accent { border-color: var(--accent); color: var(--accent); background: rgba(131,195,149,0.08); }
+        .diagram-box.dim { color: var(--text-secondary); border-color: var(--border); }
+        .diagram-arrow { color: var(--accent); font-size: 1.3rem; font-weight: 700; }
+        .diagram-vertical {
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            gap: 0.3rem;
+            margin: 1.5rem 0;
+            padding: 1.5rem;
+            background: var(--bg-card);
+            border: 1px solid var(--border);
+            border-radius: 8px;
+        }
+        .diagram-vertical .diagram-arrow { font-size: 1.1rem; }
+        .hierarchy {
+            display: flex;
+            flex-direction: column;
+            gap: 0.75rem;
+            margin: 1.5rem 0;
+            padding: 1.5rem;
+            background: var(--bg-card);
+            border: 1px solid var(--border);
+            border-radius: 8px;
+        }
+        .hierarchy-level { display: flex; align-items: center; gap: 0.75rem; }
+        .hierarchy-label {
+            font-family: var(--font-mono);
+            font-size: 0.75rem;
+            color: var(--text-secondary);
+            min-width: 80px;
+            text-align: right;
+        }
+        .hierarchy-items { display: flex; flex-wrap: wrap; gap: 0.35rem; }
+        .hierarchy-item {
+            font-family: var(--font-mono);
+            font-size: 0.75rem;
+            padding: 0.3rem 0.6rem;
+            border-radius: 4px;
+            background: var(--bg-code);
+            border: 1px solid var(--border);
+            color: var(--text-secondary);
+        }
+        .hierarchy-item.accent { border-color: var(--accent); color: var(--accent); background: rgba(131,195,149,0.08); }
+        .diagram-grid {
+            display: grid;
+            gap: 0.75rem;
+            margin: 1.5rem 0;
+            padding: 1.5rem;
+            background: var(--bg-card);
+            border: 1px solid var(--border);
+            border-radius: 8px;
+        }
+        .diagram-grid.cols-2 { grid-template-columns: 1fr 1fr; }
+        .diagram-grid.cols-3 { grid-template-columns: 1fr 1fr 1fr; }
+        .diagram-panel {
+            padding: 1rem;
+            background: var(--bg-code);
+            border: 1px solid var(--border);
+            border-radius: 6px;
+        }
+        .diagram-panel.accent-border { border-left: 3px solid var(--accent); }
+        .diagram-panel h4 {
+            font-family: var(--font-display);
+            font-size: 1rem;
+            color: var(--accent);
+            margin-bottom: 0.5rem;
+        }
+        .diagram-panel p, .diagram-panel ul { font-size: 0.85rem; }
+        .callout {
+            background: var(--bg-card);
+            border-left: 3px solid var(--accent);
+            border-radius: 0 8px 8px 0;
+            padding: 1rem 1.25rem;
+            margin: 1.25rem 0;
+        }
+        .callout p { margin-bottom: 0; }
+        .callout p + p { margin-top: 0.5rem; }
+        .callout .callout-label {
+            font-family: var(--font-mono);
+            font-size: 0.75rem;
+            color: var(--accent);
+            text-transform: uppercase;
+            letter-spacing: 0.1em;
+            margin-bottom: 0.3rem;
+        }
+        .contents-list { list-style: none; padding-left: 0; counter-reset: contents; }
+        .contents-list li {
+            counter-increment: contents;
+            padding: 0.6rem 0;
+            border-bottom: 1px solid var(--border);
+            display: flex;
+            align-items: center;
+            gap: 1rem;
+        }
+        .contents-list li:last-child { border-bottom: none; }
+        .contents-list li::before {
+            content: counter(contents, decimal-leading-zero);
+            font-family: var(--font-mono);
+            font-size: 0.85rem;
+            color: var(--accent);
+            min-width: 2rem;
+        }
+        .contents-list a { color: var(--text-primary); text-decoration: none; transition: color 0.2s; }
+        .contents-list a:hover { color: var(--accent); }
+        .footer {
+            text-align: center;
+            padding: 3rem 1.5rem;
+            color: var(--text-secondary);
+            font-size: 0.85rem;
+            border-top: 1px solid var(--border);
+            max-width: var(--max-width);
+            margin: 0 auto;
+        }
+        .footer a { color: var(--accent); text-decoration: none; }
+        .footer a:hover { text-decoration: underline; }
+        .canvas-wrap {
+            background: var(--bg-card);
+            border: 1px solid var(--border);
+            border-radius: 8px;
+            padding: 1rem;
+            margin: 1.25rem 0;
+            overflow-x: auto;
+        }
+        .canvas-wrap canvas, .canvas-wrap svg { display: block; margin: 0 auto; max-width: 100%; }
+        .badge {
+            display: inline-block;
+            font-family: var(--font-mono);
+            font-size: 0.65rem;
+            padding: 0.1rem 0.45rem;
+            border-radius: 999px;
+            border: 1px solid var(--border);
+            color: var(--text-secondary);
+            vertical-align: middle;
+            margin-left: 0.3rem;
+        }
+        .badge.ok    { border-color: var(--accent); color: var(--accent); background: var(--accent-dim); }
+        .badge.warn  { border-color: #eac48b; color: #eac48b; background: rgba(234,196,139,0.08); }
+        .badge.bad   { border-color: #f48f70; color: #f48f70; background: rgba(244,143,112,0.08); }
+        @media (max-width: 640px) {
+            .slide { padding: 3rem 1rem; min-height: auto; }
+            .slide-number { font-size: 3rem; top: 1.5rem; right: 1rem; }
+            .slide h2 { font-size: 1.5rem; }
+            .diagram-grid.cols-2, .diagram-grid.cols-3 { grid-template-columns: 1fr; }
+            .pipeline { gap: 0.15rem; }
+            .pipeline-step { font-size: 0.6rem; padding: 0.2rem 0.4rem; }
+            .hero h1 { font-size: 1.8rem; }
+            table { font-size: 0.78rem; }
+        }
+        .slide p a, .slide td a, .slide li a, .callout a { color: var(--accent); text-decoration: none; border-bottom: 1px dotted var(--accent); }
+        .slide p a:hover, .slide td a:hover, .slide li a:hover, .callout a:hover { border-bottom-style: solid; }
+        .hero { overflow: hidden; }
+        .diagram-panel { min-width: 0; }
+        .metric-label .katex, .callout-label .katex, .series-label .katex,
+        .metric-label .katex *, .callout-label .katex * { text-transform: none; }
+        .canvas-wrap canvas { image-rendering: auto; }
+        .katex-display { overflow-x: auto; overflow-y: hidden; padding: 0.25rem 0; }
+        @media (max-width: 640px) { .katex-display { font-size: 0.8em; } }
+        .chart-wrap { background: var(--bg-card); border: 1px solid var(--border); border-radius: 8px; padding: 0.75rem; margin: 1.25rem 0; }
+        .chart-wrap svg { display: block; width: 100%; height: auto; }
+        .chart-cap { font-size: 0.8rem; color: var(--text-secondary); margin-top: 0.4rem; }
+        .live-link { font-family: var(--font-mono); font-size: 0.8rem; margin-top: 1rem; }
+        .widget { background: var(--bg-card); border: 1px solid var(--border); border-radius: 8px; padding: 1rem; margin: 1.25rem 0; }
+        .widget .row { display: flex; flex-wrap: wrap; gap: 0.6rem 1rem; align-items: center; margin-bottom: 0.6rem; }
+        .widget label { font-family: var(--font-mono); font-size: 0.78rem; color: var(--text-secondary); display: flex; gap: 0.5rem; align-items: center; }
+        .widget input[type=range] { width: 160px; max-width: 100%; accent-color: var(--accent); }
+        .widget select { background: var(--bg-code); color: var(--text-primary); border: 1px solid var(--border); border-radius: 4px; padding: 0.25rem 0.4rem; font-family: var(--font-mono); font-size: 0.78rem; }
+        .widget button { background: var(--bg-code); color: var(--accent); border: 1px solid var(--accent); border-radius: 4px; padding: 0.35rem 0.8rem; font-family: var(--font-mono); font-size: 0.78rem; cursor: pointer; min-height: 36px; }
+        .widget button:hover { background: var(--accent-dim); }
+        .widget .out { font-family: var(--font-mono); font-size: 0.82rem; color: var(--text-primary); }
+        .widget .cap { font-size: 0.82rem; color: var(--text-secondary); min-height: 2.6em; }
+        .widget svg { display: block; width: 100%; height: auto; }
+        .num-strong { color: var(--text-primary); font-weight: 600; }
+    /* deck-mobile-fix:hero */ .hero{overflow:hidden}@supports (overflow-x:clip){.hero{overflow:visible;overflow-x:clip}}
+    /* deck-mobile-fix:phone */ @media (max-width:640px){.diagram-box,.tier-fill,.section-divider>span,.action-btn{white-space:normal;overflow-wrap:anywhere}.diagram-grid>*,.diagram-panel,.diagram-box,.code-block,.callout,.metric,.control-group,.control-row>*,.pipeline-body,.roll-track>*,.tier-fill,.timeline-row>*{min-width:0;max-width:100%}p,li,a,code,td,th,.callout,.diagram-panel{overflow-wrap:break-word}pre{max-width:100%;overflow-x:auto}table{display:block;max-width:100%;overflow-x:auto}.katex-display,.bits,.canvas-wrap,.influence-map-wrapper,.timeline-track,div:has(>.bank-cell){max-width:100%;overflow-x:auto;overflow-y:hidden}select,input,img,video,iframe,.action-btn{max-width:100%}canvas{max-width:100%;height:auto}}
+            /* tt-charts */
+        .chart .plot-bg { fill: none; }
+        .chart .grid { stroke: var(--border); stroke-width: 1; }
+        .chart .axis { stroke: var(--text-secondary); stroke-width: 1; }
+        .chart .lbl { fill: var(--text-secondary); font-family: var(--font-mono); font-size: 12px; }
+        .chart .lbl.ax { fill: var(--text-primary); font-size: 12.5px; }
+        .chart .hline { stroke: var(--text-secondary); stroke-dasharray: 2 4; }
+        .chart .ln { fill: none; stroke-width: 2.2; }
+        .chart .eb { stroke-width: 1.4; }
+        .chart .legend-bg { fill: var(--bg-primary); stroke: var(--border); opacity: 0.92; }
+        .s1 { stroke: #56b4e9; fill: #56b4e9; } .s2 { stroke: #e69f00; fill: #e69f00; }
+        .s3 { stroke: #009e73; fill: #3fbf96; } .s4 { stroke: #cc79a7; fill: #cc79a7; }
+        .s5 { stroke: #f0e442; fill: #f0e442; } .s6 { stroke: #d55e00; fill: #d55e00; }
+        .s0 { stroke: var(--text-secondary); fill: var(--text-secondary); }
+        .ln { fill: none !important; }
+        .chart .bar { stroke: none; opacity: 0.85; }
+        .chart .lbl.inbar { fill: var(--bg-primary); font-weight: 600; }
+        @media (max-width: 640px) { .chart .lbl { font-size: 14px; } .chart .lbl.ax { font-size: 14px; } .wg-text, .wg-dim { font-size: 15px; } }
+        .wg-cell { fill: var(--bg-code); stroke: var(--border); }
+        .wg-text { fill: var(--text-primary); font-family: var(--font-mono); font-size: 13px; }
+        .wg-dim { fill: var(--text-secondary); font-family: var(--font-mono); font-size: 13px; }
+        .wg-hot { fill: #e69f00; } .wg-done { fill: #009e73; } .wg-cool { fill: #56b4e9; } .wg-idle { fill: var(--bg-code); stroke: var(--border); }
+        .wg-fwd { fill: #56b4e9; } .wg-bwd { fill: #e69f00; }
+    </style>
+    <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/katex@0.16.9/dist/katex.min.css">
+    <script defer src="https://cdn.jsdelivr.net/npm/katex@0.16.9/dist/katex.min.js"></script>
+    <script defer src="https://cdn.jsdelivr.net/npm/katex@0.16.9/dist/contrib/auto-render.min.js"
+        onload="renderMathInElement(document.body,{delimiters:[{left:'$$',right:'$$',display:true},{left:'\\(',right:'\\)',display:false}],throwOnError:false})"></script>
+</head>
+<body>
+<header class="hero">
+    <div class="series-label">Transformer Training &mdash; Presentation 08</div>
+    <h1>Mixed <span class="accent">Precision</span></h1>
+    <p class="subtitle">Real training computes in 16 and even 8 bits. Exponent against mantissa, BF16 against FP16, FP32 master weights and loss scaling, FP8 with per-tensor scaling, and gradients quantised to a few bits, each emulated on the model and measured.</p>
+
+    <div class="tags">
+        <span class="tag">FP32</span>
+        <span class="tag">BF16</span>
+        <span class="tag">FP16</span>
+        <span class="tag">Loss scaling</span>
+        <span class="tag">Master weights</span>
+        <span class="tag">FP8 E4M3/E5M2</span>
+        <span class="tag">Quantisation</span>
+    </div>
+
+    <div class="pipeline">
+        <span class="pipeline-step">Format</span>
+        <span class="pipeline-arrow">&rarr;</span>
+        <span class="pipeline-step">Round</span>
+        <span class="pipeline-arrow">&rarr;</span>
+        <span class="pipeline-step">Scale</span>
+        <span class="pipeline-arrow">&rarr;</span>
+        <span class="pipeline-step">Accumulate</span>
+        <span class="pipeline-arrow">&rarr;</span>
+        <span class="pipeline-step">Update</span>
+    </div>
+</header>
+
+<section class="slide" id="slide-00">
+    <div class="slide-number">00</div>
+    <h2>Topics We&rsquo;ll Cover</h2>
+    <ul class="contents-list">
+        <li><a href="#slide-01">Why Train in Fewer Bits</a></li>
+        <li><a href="#slide-02">Formats: Exponent Against Mantissa</a></li>
+        <li><a href="#slide-03">Rounding a Number, Live</a></li>
+        <li><a href="#slide-04">BF16 and FP16 on Real Gradients</a></li>
+        <li><a href="#slide-05">Mixed Precision: Master Weights and Loss Scaling</a></li>
+        <li><a href="#slide-06">Six Recipes, Measured</a></li>
+        <li><a href="#slide-07">FP8 and Per-Tensor Scaling</a></li>
+        <li><a href="#slide-08">Quantised Gradients</a></li>
+        <li><a href="#slide-09">What to Take Away</a></li>
+    </ul>
+    <div class="callout">
+        <div class="callout-label">Live companion and sources</div>
+        <p>This deck follows <a href="https://transformer-decoder-explained.vercel.app/training/09-mixed-precision">chapter 9, mixed precision</a>, where all 5,376 gradients of the trained model are rounded in your browser. Measured numbers: <a href="https://github.com/BrendanJamesLynskey/transformer-explainer/blob/main/results.md">results.md</a> &sect;9a&ndash;9b. The formats bit by bit: <a href="https://numerics-explained.vercel.app">Numerics Explained</a> (the site&rsquo;s rounding code is vendored from it and matches it on 202,090 values).</p>
+    </div>
+</section>
+
+<section class="slide" id="slide-01">
+    <div class="slide-number">01</div>
+    <h2>Why Train in Fewer Bits</h2>
+    <p>Every number in the site&rsquo;s trainer is a 64-bit double. Real training uses 16-bit and even 8-bit numbers, because they halve or quarter the memory and the traffic, and the matrix units run several times faster on them.</p>
+    <div class="diagram-grid cols-3">
+        <div class="diagram-panel accent-border"><h4>Memory</h4><p>Weights, gradients and activations at 2 bytes instead of 4 (<a href="https://brendanjameslynskey.github.io/Transformer_Training_09_Memory/">deck 09</a>).</p></div>
+        <div class="diagram-panel accent-border"><h4>Traffic</h4><p>Two bytes per parameter per worker per step is what crosses the network when workers exchange BF16 gradients (<a href="https://brendanjameslynskey.github.io/Transformer_Training_10_Data_Parallelism_and_ZeRO/">deck 10</a>, <a href="https://brendanjameslynskey.github.io/Transformer_Training_12_Training_over_Slow_Links/">deck 12</a>).</p></div>
+        <div class="diagram-panel accent-border"><h4>The cost</h4><p>Precision and range: small numbers fall off the bottom of the format and become zero; large ones overflow.</p></div>
+    </div>
+</section>
+
+<section class="slide" id="slide-02">
+    <div class="slide-number">02</div>
+    <h2>Formats: Exponent Against Mantissa</h2>
+    <p>A floating-point number has a sign, an exponent (its <strong>range</strong>) and a mantissa (its <strong>precision</strong>: how many values per factor of two). With \(e\) exponent and \(m\) mantissa bits and bias \(2^{e-1}-1\), the spacing near \(|x|\) is \(2^{\max(\lfloor\log_2|x|\rfloor,\,1-\text{bias}) - m}\), so the relative rounding error is at most \(2^{-m-1}\).</p>
+    <div class="table-wrap">
+        <table>
+            <thead><tr><th>Format</th><th>Exponent / mantissa bits</th><th>Smallest subnormal</th><th>Largest</th><th>Relative precision</th></tr></thead>
+            <tbody>
+                <tr><td>FP32</td><td>8 / 23</td><td>2<sup>&minus;149</sup></td><td>3.4&times;10<sup>38</sup></td><td>2<sup>&minus;24</sup></td></tr>
+                <tr><td>BF16</td><td>8 / 7</td><td>2<sup>&minus;133</sup></td><td>3.4&times;10<sup>38</sup></td><td>2<sup>&minus;8</sup></td></tr>
+                <tr><td>FP16</td><td>5 / 10</td><td>2<sup>&minus;24</sup></td><td>65,504</td><td>2<sup>&minus;11</sup></td></tr>
+                <tr><td>FP8 E5M2</td><td>5 / 2</td><td>2<sup>&minus;16</sup></td><td>57,344</td><td>2<sup>&minus;3</sup></td></tr>
+                <tr><td>FP8 E4M3</td><td>4 / 3</td><td>2<sup>&minus;9</sup></td><td>448</td><td>2<sup>&minus;4</sup></td></tr>
+            </tbody>
+        </table>
+    </div>
+    <p><strong>BF16</strong> (bfloat16) is 2 bytes like FP16 but keeps FP32&rsquo;s 8-bit exponent: the same range as FP32 and about 2&ndash;3 significant decimal digits (<a href="https://arxiv.org/abs/1905.12322">Kalamkar et al. 2019</a>). FP16 has more precision but a narrow range.</p>
+</section>
+
+<section class="slide" id="slide-03">
+    <div class="slide-number">03</div>
+    <h2>Rounding a Number, Live</h2>
+    <p>Type a value; it is rounded to nearest (ties to even) in each format, with subnormals and overflow. FP32 uses the browser&rsquo;s own <code>Math.fround</code>; the others the spacing formula on the previous slide.</p>
+    <div class="widget" id="rnd-widget">
+        <div class="row">
+            <label>x = <input type="text" id="rnd-x" value="0.1" size="12" style="background:var(--bg-code);color:var(--text-primary);border:1px solid var(--border);border-radius:4px;padding:0.25rem 0.4rem;font-family:var(--font-mono)"></label>
+            <button data-v="0.1">0.1</button><button data-v="3.14159">&pi;</button><button data-v="3e-8">3e-8</button><button data-v="70000">70000</button>
+        </div>
+        <div class="table-wrap"><table><thead><tr><th>Format</th><th>Rounded</th><th>Relative error</th></tr></thead><tbody id="rnd-body"></tbody></table></div>
+        <div class="cap" id="rnd-cap" aria-live="polite"></div>
+    </div>
+    <script>
+    (function () {
+        const F = [['FP32', 8, 23, 3.4028234663852886e38], ['BF16', 8, 7, 3.3895313892515355e38], ['FP16', 5, 10, 65504], ['FP8 E5M2', 5, 2, 57344], ['FP8 E4M3', 4, 3, 448]];
+        const rhe = v => { const f = Math.floor(v), d = v - f; return d > 0.5 ? f + 1 : d < 0.5 ? f : (f % 2 === 0 ? f : f + 1); };
+        function round(x, e, m, max) {
+            if (e === 8 && m === 23) return Math.fround(x);
+            if (x === 0) return 0;
+            const bias = 2 ** (e - 1) - 1, E = Math.max(Math.floor(Math.log2(Math.abs(x))), 1 - bias), sp = 2 ** (E - m);
+            const r = Math.sign(x) * rhe(Math.abs(x) / sp) * sp;
+            return Math.abs(r) > max ? Infinity * Math.sign(x) : r;
+        }
+        window.__round = (x, name) => { const f = F.find(q => q[0] === name); return round(x, f[1], f[2], f[3]); };
+        const inp = document.getElementById('rnd-x'), body = document.getElementById('rnd-body');
+        function upd() {
+            const x = parseFloat(inp.value);
+            if (!isFinite(x)) { body.innerHTML = ''; return; }
+            let flushed = [], over = [];
+            body.innerHTML = F.map(([n, e, m, max]) => {
+                const r = round(x, e, m, max);
+                if (r === 0 && x !== 0) flushed.push(n); if (!isFinite(r)) over.push(n);
+                const rel = isFinite(r) ? Math.abs(r - x) / Math.abs(x) : NaN;
+                return '<tr><td>' + n + '</td><td>' + (isFinite(r) ? r.toPrecision(10) : 'overflow') + '</td><td>' + (isFinite(rel) ? rel.toExponential(2) : '–') + '</td></tr>';
+            }).join('');
+            document.getElementById('rnd-cap').textContent = (flushed.length ? 'Flushed to zero in ' + flushed.join(', ') + '. ' : '') + (over.length ? 'Overflows in ' + over.join(', ') + '. ' : '') +
+                (flushed.length || over.length ? '' : 'Every format represents it; the relative error grows as the mantissa shrinks.');
+        }
+        inp.addEventListener('input', upd);
+        document.querySelectorAll('#rnd-widget button').forEach(b => b.onclick = () => { inp.value = b.dataset.v; upd(); });
+        upd();
+    })();
+    </script>
+</section>
+
+<section class="slide" id="slide-04">
+    <div class="slide-number">04</div>
+    <h2>BF16 and FP16 on Real Gradients</h2>
+    <p>All 5,376 gradients of the trained model, rounded to each format (results.json <code>gradRounding</code>, the site&rsquo;s chapter 9 animation):</p>
+    <div class="table-wrap">
+        <table>
+            <thead><tr><th>Format (no scaling)</th><th>Gradients flushed to zero</th><th>Mean relative error</th></tr></thead>
+            <tbody>
+                <tr><td>FP32</td><td>0 of 5,376</td><td>2.2e-08</td></tr>
+                <tr><td>BF16</td><td>0 of 5,376</td><td>1.4e-03</td></tr>
+                <tr><td>FP16</td><td>69 of 5,376</td><td>6.1e-03</td></tr>
+                <tr><td>FP8 E5M2</td><td>405 of 5,376</td><td>4.8e-02</td></tr>
+                <tr><td>FP8 E4M3</td><td>1,601 of 5,376</td><td>1.2e-01</td></tr>
+            </tbody>
+        </table>
+    </div>
+    <p>BF16&rsquo;s range keeps every gradient; FP16 loses the smallest; FP8 loses many. That trade is why most large runs today compute in BF16: it <strong>needs no loss scaling</strong>. Multiplying the loss by \(2^k\) before the backward pass shifts every gradient up by \(k\) binades, into FP16&rsquo;s range:</p>
+    <div class="chart-wrap"><svg class="chart" viewBox="0 0 480 290" role="img" aria-label="FP16 gradients lost against loss scale">
+<rect class="plot-bg" x="62" y="18" width="392" height="230"/>
+<line class="grid" x1="62" x2="454" y1="248.0" y2="248.0"/>
+<text class="lbl" x="56" y="252.0" text-anchor="end">0</text>
+<line class="grid" x1="62" x2="454" y1="203.8" y2="203.8"/>
+<text class="lbl" x="56" y="207.8" text-anchor="end">500</text>
+<line class="grid" x1="62" x2="454" y1="159.5" y2="159.5"/>
+<text class="lbl" x="56" y="163.5" text-anchor="end">1,000</text>
+<line class="grid" x1="62" x2="454" y1="115.3" y2="115.3"/>
+<text class="lbl" x="56" y="119.3" text-anchor="end">1,500</text>
+<line class="grid" x1="62" x2="454" y1="71.1" y2="71.1"/>
+<text class="lbl" x="56" y="75.1" text-anchor="end">2,000</text>
+<line class="grid" x1="62" x2="454" y1="26.8" y2="26.8"/>
+<text class="lbl" x="56" y="30.8" text-anchor="end">2,500</text>
+<line class="grid" x1="77.1" x2="77.1" y1="18" y2="248"/>
+<text class="lbl" x="77.1" y="264" text-anchor="middle">0</text>
+<line class="grid" x1="137.4" x2="137.4" y1="18" y2="248"/>
+<text class="lbl" x="137.4" y="264" text-anchor="middle">4</text>
+<line class="grid" x1="197.7" x2="197.7" y1="18" y2="248"/>
+<text class="lbl" x="197.7" y="264" text-anchor="middle">8</text>
+<line class="grid" x1="258.0" x2="258.0" y1="18" y2="248"/>
+<text class="lbl" x="258.0" y="264" text-anchor="middle">12</text>
+<line class="grid" x1="318.3" x2="318.3" y1="18" y2="248"/>
+<text class="lbl" x="318.3" y="264" text-anchor="middle">16</text>
+<line class="grid" x1="378.6" x2="378.6" y1="18" y2="248"/>
+<text class="lbl" x="378.6" y="264" text-anchor="middle">20</text>
+<line class="grid" x1="438.9" x2="438.9" y1="18" y2="248"/>
+<text class="lbl" x="438.9" y="264" text-anchor="middle">24</text>
+<line class="axis" x1="62" x2="454" y1="248" y2="248"/>
+<line class="axis" x1="62" x2="62" y1="18" y2="248"/>
+<text class="lbl ax" x="258" y="284" text-anchor="middle">loss scale 2^k: k</text>
+<text class="lbl ax" x="13" y="133" text-anchor="middle" transform="rotate(-90 13 133)">FP16 gradients lost (of 5,376)</text>
+<clipPath id="clip133408786453440"><rect x="62" y="18" width="392" height="230"/></clipPath>
+<g clip-path="url(#clip133408786453440)">
+<path class="ln s1" d="M77.1,241.9 L137.4,248.0 L197.7,248.0 L258.0,248.0 L318.3,248.0 L378.6,248.0 L438.9,248.0"/>
+<circle class="pt s1" cx="77.1" cy="241.9" r="3"/>
+<circle class="pt s1" cx="137.4" cy="248.0" r="3"/>
+<circle class="pt s1" cx="197.7" cy="248.0" r="3"/>
+<circle class="pt s1" cx="258.0" cy="248.0" r="3"/>
+<circle class="pt s1" cx="318.3" cy="248.0" r="3"/>
+<circle class="pt s1" cx="378.6" cy="248.0" r="3"/>
+<circle class="pt s1" cx="438.9" cy="248.0" r="3"/>
+<path class="ln s6" d="M77.1,248.0 L137.4,248.0 L197.7,248.0 L258.0,248.0 L318.3,248.0 L378.6,225.0 L438.9,24.9"/>
+<circle class="pt s6" cx="77.1" cy="248.0" r="3"/>
+<circle class="pt s6" cx="137.4" cy="248.0" r="3"/>
+<circle class="pt s6" cx="197.7" cy="248.0" r="3"/>
+<circle class="pt s6" cx="258.0" cy="248.0" r="3"/>
+<circle class="pt s6" cx="318.3" cy="248.0" r="3"/>
+<circle class="pt s6" cx="378.6" cy="225.0" r="3"/>
+<circle class="pt s6" cx="438.9" cy="24.9" r="3"/>
+</g>
+<g class="legend"><rect class="legend-bg" x="68" y="24" width="133" height="40" rx="4"/><line class="ln s1" x1="76" x2="94" y1="34" y2="34"/><text class="lbl" x="99" y="38">flushed to zero</text><line class="ln s6" x1="76" x2="94" y1="50" y2="50"/><text class="lbl" x="99" y="54">overflowed</text></g>
+</svg><div class="chart-cap">The trained model&rsquo;s gradients in FP16 at loss scales 2<sup>0</sup> to 2<sup>24</sup> (results.json <code>gradRounding</code>): too little scale flushes small gradients to zero, too much overflows large ones. Dynamic scaling looks for the gap.</div></div>
+</section>
+
+<section class="slide" id="slide-05">
+    <div class="slide-number">05</div>
+    <h2>Mixed Precision: Master Weights and Loss Scaling</h2>
+    <p><a href="https://arxiv.org/abs/1710.03740">Micikevicius et al. (2018)</a> made 16-bit training work with three ideas:</p>
+    <div class="diagram-grid cols-3">
+        <div class="diagram-panel accent-border"><h4>FP32 master copy</h4><p>Compute in 16 bits, but the optimiser updates an FP32 copy of the weights. An update is often smaller than the spacing between 16-bit values near the weight, so adding it to a 16-bit weight would do nothing.</p></div>
+        <div class="diagram-panel accent-border"><h4>FP32 accumulation</h4><p>The matrix products accumulate their sums in FP32, so long dot products do not lose their small terms.</p></div>
+        <div class="diagram-panel accent-border"><h4>Loss scaling</h4><p>\(\tilde L = 2^k L \Rightarrow \tilde g = 2^k g\); the optimiser divides by \(2^k\) in FP32. <em>Dynamic</em> scaling halves the scale and skips the step on an overflow, and doubles it after a long run of good steps (PyTorch&rsquo;s <code>GradScaler</code>).</p></div>
+    </div>
+</section>
+
+<section class="slide" id="slide-06">
+    <div class="slide-number">06</div>
+    <h2>Six Recipes, Measured</h2>
+    <p>The default run with every weight&rsquo;s compute copy, every activation a matrix product reads or writes, and every gradient rounded to the format (float64 stands in for FP32 in the elementwise operations and the master weights); three seeds (results.md &sect;9a):</p>
+    <div class="table-wrap">
+        <table>
+            <thead><tr><th>Recipe</th><th>Final validation loss</th><th>Seeds 1, 2, 3</th><th>Gradient values flushed to zero</th></tr></thead>
+            <tbody>
+                <tr><td>float64 (reference)</td><td>2.277 &plusmn; 0.090</td><td>2.299, 2.354, 2.178</td><td>0.00%</td></tr>
+                <tr><td>FP32</td><td>2.316 &plusmn; 0.085</td><td>2.298, 2.408, 2.242</td><td>0.00%</td></tr>
+                <tr><td>BF16, FP32 master weights</td><td>2.329 &plusmn; 0.059</td><td>2.269, 2.334, 2.386</td><td>0.00%</td></tr>
+                <tr><td>BF16, no master copy</td><td>2.296 &plusmn; 0.027</td><td>2.325, 2.290, 2.272</td><td>0.00%</td></tr>
+                <tr><td>FP16, no loss scaling</td><td>2.331 &plusmn; 0.027</td><td>2.340, 2.352, 2.301</td><td>4.56%</td></tr>
+                <tr><td>FP16, dynamic loss scaling</td><td>2.288 &plusmn; 0.131</td><td>2.266, 2.429, 2.169</td><td>0.13%</td></tr>
+                <tr><td>FP8 (E4M3 / E5M2), no scaling</td><td>2.957 &plusmn; 0.011</td><td>2.945, 2.959, 2.967</td><td>15.82%</td></tr>
+                <tr><td>FP8 (E4M3 / E5M2), per-tensor scaling</td><td>2.574 &plusmn; 0.338</td><td>2.383, 2.965, 2.374</td><td>1.96%</td></tr>
+            </tbody>
+        </table>
+    </div>
+    <p>FP32, BF16 with master weights and FP16 with dynamic loss scaling all end within the seeds&rsquo; spread of the float64 reference. So, at this size, do the two recipes that <em>should</em> hurt: FP16 without scaling (although 4.6% of its gradient values were flushed to zero) and BF16 with no master copy (although 43% of its weight updates were rounded away). A 5,376-parameter model trained for 2,000 steps is forgiving; at scale, with longer runs and smaller late learning rates, the same losses accumulate, which is why master copies and loss scaling are standard.</p>
+</section>
+
+<section class="slide" id="slide-07">
+    <div class="slide-number">07</div>
+    <h2>FP8 and Per-Tensor Scaling</h2>
+    <p>The newest accelerators also multiply in 8-bit floats. <a href="https://arxiv.org/abs/2209.05433">Micikevicius et al. (2022)</a> recommend <strong>E4M3</strong> (largest 448) for weights and activations and <strong>E5M2</strong> (more range, less precision) for gradients, with a <em>scaling factor per tensor</em> so each tensor&rsquo;s largest value lands near the top of the format:</p>
+    $$s = 2^{\lfloor \log_2(\max_{\text{fmt}} / \operatorname{amax}(x)) \rfloor}, \qquad \hat x = \operatorname{round}(s x)/s$$
+    <div class="diagram-grid cols-2">
+        <div class="diagram-panel accent-border"><h4>No scaling</h4><p>Never leaves the plateau: 2.957 &plusmn; 0.011, with 16% of gradient values flushed to zero.</p></div>
+        <div class="diagram-panel accent-border"><h4>Per-tensor scaling</h4><p>Two of three seeds train (2.383, 2.965, 2.374): three mantissa bits are coarse, and at this scale whether the run escapes the plateau is a coin toss.</p></div>
+    </div>
+    <p>In the emulation only what the matrix products read is FP8; what they write stays BF16, as in those recipes. The site&rsquo;s <a href="https://colab.research.google.com/github/BrendanJamesLynskey/transformer-explainer/blob/main/notebooks/09_mixed_precision.ipynb">notebook 09</a> trains a 60-million-parameter model in each format on a GPU: <strong>GPU run pending</strong>, so no GPU number appears here.</p>
+</section>
+
+<section class="slide" id="slide-08">
+    <div class="slide-number">08</div>
+    <h2>Quantised Gradients</h2>
+    <p>Beyond floating point, values can be <strong>quantised</strong> to a few bits of integer: pick a <em>full scale</em> \(F\), divide it into \(n = 2^{b-1}-1\) steps each side of zero, round each value to the nearest step, and clip anything beyond the full scale.</p>
+    $$\hat x = \Delta \cdot \operatorname{clip}\big(\operatorname{round}(x/\Delta), -n, n\big), \qquad \Delta = F/n$$
+    <div class="table-wrap">
+        <table>
+            <thead><tr><th>Bits</th><th>Levels</th><th>Final validation loss</th><th>Seeds 1, 2, 3</th></tr></thead>
+            <tbody>
+                <tr><td>8</td><td>255</td><td>2.286 &plusmn; 0.069</td><td>2.321, 2.331, 2.207</td></tr>
+                <tr><td>4</td><td>15</td><td>2.413 &plusmn; 0.209</td><td>2.653, 2.269, 2.315</td></tr>
+                <tr><td>2</td><td>3</td><td>2.860 &plusmn; 0.182</td><td>2.650, 2.966, 2.964</td></tr>
+            </tbody>
+        </table>
+    </div>
+    <p>Every weight gradient quantised per tensor (full scale = its largest value) before clipping and the optimiser step; three seeds (results.md &sect;9b). Adam is forgiving here too, since it normalises each weight&rsquo;s step (<a href="https://arxiv.org/abs/1610.02132">Alistarh et al. 2016</a> analyse quantised SGD). Quantised gradients are what compressed distributed training sends between workers (<a href="https://brendanjameslynskey.github.io/Transformer_Training_12_Training_over_Slow_Links/">deck 12</a>), and analogue or optical hardware imposes the same quantisation on whatever passes through it.</p>
+</section>
+
+<section class="slide" id="slide-09">
+    <div class="slide-number">09</div>
+    <h2>What to Take Away</h2>
+    <ul>
+        <li>Exponent bits buy <strong>range</strong>, mantissa bits <strong>precision</strong>. BF16 = FP32&rsquo;s range in 2 bytes, so no loss scaling.</li>
+        <li>16-bit training = 16-bit compute + <strong>FP32 master weights</strong> + FP32 accumulation (+ <strong>loss scaling</strong> for FP16).</li>
+        <li>FP8 needs <strong>per-tensor scaling</strong>: E4M3 forward, E5M2 for gradients.</li>
+        <li>On this toy every reasonable recipe lands within the seed spread; the safeguards matter at scale.</li>
+    </ul>
+    <p class="live-link">Animated: <a href="https://transformer-decoder-explained.vercel.app/training/09-mixed-precision">chapter 9, mixed precision</a> &middot; formats in depth: <a href="https://numerics-explained.vercel.app">Numerics Explained</a> &middot; next: <a href="https://brendanjameslynskey.github.io/Transformer_Training_09_Memory/">deck 09, memory</a></p>
+</section>
+
+<footer class="footer">
+    <p>Part of the <a href="https://github.com/BrendanJamesLynskey/LLM_Hub_Transformer_Training">Transformer Training series</a> &middot; live, animated companion: <a href="https://transformer-decoder-explained.vercel.app/training/09-mixed-precision">chapter 9, Mixed precision</a> of <a href="https://transformer-decoder-explained.vercel.app/training">Transformer Decoder Explained, Part 2</a></p>
+    <p style="margin-top: 0.5rem; font-size: 0.8rem;"><a href="https://brendanjameslynskey.github.io/Transformer_Training_07_Stability/">&larr; 07 Stability</a> &nbsp;&middot;&nbsp; <a href="https://brendanjameslynskey.github.io/LLM_Hub_Transformer_Training/">Series index</a> &nbsp;&middot;&nbsp; <a href="https://brendanjameslynskey.github.io/Transformer_Training_09_Memory/">09 Memory &rarr;</a></p>
+    <p style="margin-top: 0.5rem; font-size: 0.75rem;">Measured numbers: <a href="https://github.com/BrendanJamesLynskey/transformer-explainer/blob/main/results.md">results.md</a> (transformer-explainer @15b1c9f). Code on these slides is cut from that repository.</p>
+</footer>
+<script>
+    document.querySelectorAll('a[href^="#"]').forEach(anchor => {
+        anchor.addEventListener('click', function (e) {
+            e.preventDefault();
+            const target = document.querySelector(this.getAttribute('href'));
+            if (target) target.scrollIntoView({ behavior: 'smooth', block: 'start' });
+        });
+    });
+    const observer = new IntersectionObserver((entries) => {
+        entries.forEach(entry => {
+            if (entry.isIntersecting) {
+                entry.target.style.opacity = '1';
+                entry.target.style.transform = 'translateY(0)';
+            }
+        });
+    }, { threshold: 0.1 });
+    document.querySelectorAll('.slide').forEach(slide => {
+        slide.style.opacity = '0';
+        slide.style.transform = 'translateY(30px)';
+        slide.style.transition = 'opacity 0.6s ease, transform 0.6s ease';
+        observer.observe(slide);
+    });
+</script>
+</body>
+</html>
