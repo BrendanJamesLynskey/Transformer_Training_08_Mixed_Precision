@@ -496,7 +496,7 @@
     </ul>
     <div class="callout">
         <div class="callout-label">Live companion and sources</div>
-        <p>This deck follows <a href="https://transformer-decoder-explained.vercel.app/training/09-mixed-precision">chapter 9, mixed precision</a>, where all 5,376 gradients of the trained model are rounded in your browser. Measured numbers: <a href="https://github.com/BrendanJamesLynskey/transformer-explainer/blob/main/results.md">results.md</a> &sect;9a&ndash;9b. The formats bit by bit: <a href="https://numerics-explained.vercel.app">Numerics Explained</a> (the site&rsquo;s rounding code is vendored from it and matches it on 202,090 values).</p>
+        <p>This deck follows <a href="https://transformer-training-explained.vercel.app/training/09-mixed-precision">chapter 9, mixed precision</a>, where all 5,376 gradients of the trained model are rounded in your browser. Measured numbers: <a href="https://github.com/BrendanJamesLynskey/transformer-explainer/blob/main/results.md">results.md</a> &sect;9a&ndash;9b. The formats bit by bit: <a href="https://numerics-explained.vercel.app">Numerics Explained</a> (the site&rsquo;s rounding code is vendored from it and matches it on 202,090 values).</p>
     </div>
 </section>
 
@@ -624,8 +624,8 @@
 <line class="axis" x1="62" x2="62" y1="18" y2="248"/>
 <text class="lbl ax" x="258" y="284" text-anchor="middle">loss scale 2^k: k</text>
 <text class="lbl ax" x="13" y="133" text-anchor="middle" transform="rotate(-90 13 133)">FP16 gradients lost (of 5,376)</text>
-<clipPath id="clip133408786453440"><rect x="62" y="18" width="392" height="230"/></clipPath>
-<g clip-path="url(#clip133408786453440)">
+<clipPath id="clip129418997677184"><rect x="62" y="18" width="392" height="230"/></clipPath>
+<g clip-path="url(#clip129418997677184)">
 <path class="ln s1" d="M77.1,241.9 L137.4,248.0 L197.7,248.0 L258.0,248.0 L318.3,248.0 L378.6,248.0 L438.9,248.0"/>
 <circle class="pt s1" cx="77.1" cy="241.9" r="3"/>
 <circle class="pt s1" cx="137.4" cy="248.0" r="3"/>
@@ -719,11 +719,11 @@
         <li>FP8 needs <strong>per-tensor scaling</strong>: E4M3 forward, E5M2 for gradients.</li>
         <li>On this toy every reasonable recipe lands within the seed spread; the safeguards matter at scale.</li>
     </ul>
-    <p class="live-link">Animated: <a href="https://transformer-decoder-explained.vercel.app/training/09-mixed-precision">chapter 9, mixed precision</a> &middot; formats in depth: <a href="https://numerics-explained.vercel.app">Numerics Explained</a> &middot; next: <a href="https://brendanjameslynskey.github.io/Transformer_Training_09_Memory/">deck 09, memory</a></p>
+    <p class="live-link">Animated: <a href="https://transformer-training-explained.vercel.app/training/09-mixed-precision">chapter 9, mixed precision</a> &middot; formats in depth: <a href="https://numerics-explained.vercel.app">Numerics Explained</a> &middot; next: <a href="https://brendanjameslynskey.github.io/Transformer_Training_09_Memory/">deck 09, memory</a></p>
 </section>
 
 <footer class="footer">
-    <p>Part of the <a href="https://github.com/BrendanJamesLynskey/LLM_Hub_Transformer_Training">Transformer Training series</a> &middot; live, animated companion: <a href="https://transformer-decoder-explained.vercel.app/training/09-mixed-precision">chapter 9, Mixed precision</a> of <a href="https://transformer-decoder-explained.vercel.app/training">Transformer Decoder Explained, Part 2</a></p>
+    <p>Part of the <a href="https://github.com/BrendanJamesLynskey/LLM_Hub_Transformer_Training">Transformer Training series</a> &middot; live, animated companion: <a href="https://transformer-training-explained.vercel.app/training/09-mixed-precision">chapter 9, Mixed precision</a> of <a href="https://transformer-training-explained.vercel.app/training">Transformer Decoder Explained, Part 2</a></p>
     <p style="margin-top: 0.5rem; font-size: 0.8rem;"><a href="https://brendanjameslynskey.github.io/Transformer_Training_07_Stability/">&larr; 07 Stability</a> &nbsp;&middot;&nbsp; <a href="https://brendanjameslynskey.github.io/LLM_Hub_Transformer_Training/">Series index</a> &nbsp;&middot;&nbsp; <a href="https://brendanjameslynskey.github.io/Transformer_Training_09_Memory/">09 Memory &rarr;</a></p>
     <p style="margin-top: 0.5rem; font-size: 0.75rem;">Measured numbers: <a href="https://github.com/BrendanJamesLynskey/transformer-explainer/blob/main/results.md">results.md</a> (transformer-explainer @15b1c9f). Code on these slides is cut from that repository.</p>
 </footer>
